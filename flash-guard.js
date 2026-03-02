@@ -1,25 +1,26 @@
 // Runs at document_start, AFTER flash-guard.css has already darkened the page.
-// flash-guard.css (pure CSS via * selector) covers ALL elements with #111 bg.
-// This script quickly:
-//   - Removes that CSS if dark mode is NOT on for this tab
-//   - Narrows it to html,body with the exact theme colour if dark mode IS on
+// Uses sessionStorage (synchronous, per-tab) to decide INSTANTLY whether to
+// keep or remove the dark CSS — no async background round-trip needed.
 (() => {
-  chrome.runtime.sendMessage({ action: 'getTabState' }, (response) => {
-    // Find the <style> element Chrome injected for flash-guard.css
-    // At document_start it's typically the first (or only) stylesheet
+  const isDark = sessionStorage.getItem('night-reader') === '1';
+
+  if (!isDark) {
+    // Not a dark-mode tab — remove the flash-guard CSS immediately (sync, pre-paint)
     const guardStyle = [...document.querySelectorAll('style')].find(
       el => el.textContent.includes('#111')
     );
+    if (guardStyle) guardStyle.remove();
+    return;
+  }
 
-    if (chrome.runtime.lastError || !response?.enabled) {
-      // Not a dark-mode tab — remove the aggressive * selector immediately
-      if (guardStyle) guardStyle.remove();
-    } else {
-      // Dark mode IS on — keep html,body dark with exact theme colour.
-      // Remove the * rule (content.js will handle inner elements when it loads).
-      if (guardStyle) {
-        guardStyle.textContent = `html,body{background-color:${response.bg}!important;background-image:none!important}`;
-      }
+  // Dark mode IS on — ask background for the exact theme colour
+  chrome.runtime.sendMessage({ action: 'getTabState' }, (response) => {
+    if (chrome.runtime.lastError || !response?.enabled) return;
+    const guardStyle = [...document.querySelectorAll('style')].find(
+      el => el.textContent.includes('#111')
+    );
+    if (guardStyle) {
+      guardStyle.textContent = `html,body,*{background-color:${response.bg}!important;background-image:none!important}`;
     }
   });
 })();

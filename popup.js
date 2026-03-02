@@ -114,6 +114,20 @@ async function applyToCurrentTab() {
   const tab = tabs[0];
   if (!tab?.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
 
+  // Set sessionStorage flag so flash-guard.js can check SYNCHRONOUSLY on next load
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: currentTabId },
+      func: (on) => {
+        if (on) sessionStorage.setItem('night-reader', '1');
+        else    sessionStorage.removeItem('night-reader');
+      },
+      args: [enabled],
+    });
+  } catch {
+    // Restricted page — skip
+  }
+
   try {
     // Inject content script into the current tab
     await chrome.scripting.executeScript({

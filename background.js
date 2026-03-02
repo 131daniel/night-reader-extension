@@ -36,6 +36,11 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
   if (!result[key]) return; // Dark mode not active on this tab — do nothing
 
   try {
+    // Set sessionStorage flag so flash-guard.js works on next same-origin nav
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => sessionStorage.setItem('night-reader', '1'),
+    });
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ['content.js'],
