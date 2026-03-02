@@ -141,54 +141,114 @@ Updated `DEVELOPMENT_NOTES.md` with the complete verbatim conversation log cover
 
 ---
 
-## Technical Architecture
+### Phase 5 — Chrome Web Store Submission (v1.0.1 → v1.0.2)
+
+#### v1.0.1 — Initial Store Submission
+
+- Submitted to Chrome Web Store under developer account `131daniel`
+- Switched from `<all_urls>` to `activeTab` only to avoid broad host permission warning and speed up review
+- Removed auto `content_scripts` injection from manifest
+- Popup now injects content script on-demand via `chrome.scripting.executeScript` when user clicks icon
+- Filled out all Privacy practices fields: single purpose, permission justifications, remote code (No), data usage (none collected), certifications (all 3), privacy policy URL
+- Added and verified contact email on Account tab
+- Submitted for review — status: **under review**
+
+#### Issue Discovered After Submission
+
+After submission, user realised the `activeTab`-only approach required clicking the Night Reader icon every time they navigated to a new page or chapter — even within the same website. This was unacceptable for reading Bible chapters on BLB.
+
+#### v1.0.2 — Tab-Persistent Dark Mode
+
+**User requirement:**
+> "I want dark mode to stay active for every website I visit within that one tab. This way I don't have to reactivate as I navigate within that tab. If I open a new Chrome tab, I don't want it to apply to that new tab."
+
+**Solution implemented:**
+
+1. **`manifest.json`** — Added `"tabs"` permission and restored `"host_permissions": ["<all_urls>"]`. Version bumped to `1.0.2`.
+
+2. **`background.js`** — Rewrote service worker to:
+   - Listen to `chrome.tabs.onUpdated` — fires every time a tab navigates to a new page
+   - Check `chrome.storage.session` for key `tab_{tabId}` — if dark mode is enabled for that tab, re-inject `content.js` and send `applySettings`
+   - Listen to `chrome.tabs.onRemoved` — cleans up session state when tab is closed
+   - Uses `chrome.storage.session` (not `local`) so state clears automatically when the browser closes
+
+3. **`popup.js`** — Rewrote to manage per-tab state:
+   - On open: reads `tab_{tabId}` from session storage to show correct toggle state for the current tab
+   - On toggle: saves `tab_{tabId}` to session storage so background knows to follow this tab
+   - Each tab has completely independent dark mode state
+
+**How it works for the user:**
+- Open Blue Letter Bible on Tab 1 → click Night Reader icon → toggle ON
+- Navigate to any chapter, verse, or even a completely different website — dark mode stays on **automatically**, no clicking needed
+- Open a new Tab 2 — starts completely normal (no dark mode)
+- Enable on Tab 2 independently if desired — they track separately
+
+**Note on Chrome Web Store:** v1.0.2 could not be submitted while v1.0.1 was still under review. v1.0.2 pushed to GitHub and applied to local extension. Will be submitted as an update once v1.0.1 review completes.
+
+**Files changed in v1.0.2:** `manifest.json`, `background.js`, `popup.js`
+
+---
+
+## Technical Architecture (v1.0.2 — Current)
 
 ```
-User clicks extension icon
+User clicks Night Reader icon (opens popup)
         |
         v
-  popup.html loads
+  popup.js reads tab_{tabId} from chrome.storage.session
         |
         v
-  popup.js reads chrome.storage.local
+  Shows correct ON/OFF toggle for THIS tab only
         |
         v
-  Renders UI with saved settings
+  User toggles / changes theme / adjusts sliders
         |
-        v
-  User changes setting
+        +---> chrome.storage.session.set({ tab_{tabId}: true/false })
+        |         (background watches this key)
         |
-        +---> chrome.storage.local.set()
+        +---> chrome.scripting.executeScript → injects content.js
         |
         +---> chrome.tabs.sendMessage({ action: 'applySettings' })
                     |
                     v
-              content.js receives message
-                    |
-                    v
-              loadAndApply()
-                    |
-                    +---> Reads chrome.storage.local
-                    |
-                    +---> Builds CSS string from theme
-                    |
-                    +---> Injects/updates <style> element
-                    |
-                    +---> Adds .night-reader-active to <html>
-                    |
-                    +---> stripInlineBackgrounds() - removes inline styles
-                    |
-                    +---> Starts MutationObserver for dynamic content
+              content.js applies dark mode to current page
+
+─────────────────────────────────────────────────────
+  User navigates to a new page (same tab)
+        |
+        v
+  chrome.tabs.onUpdated fires in background.js
+        |
+        v
+  background.js checks chrome.storage.session for tab_{tabId}
+        |
+        +---> Dark mode ON for this tab?
+              |
+              Yes → executeScript (re-inject content.js)
+                  → sendMessage({ action: 'applySettings' })
+                  → Page goes dark automatically ✅
+              |
+              No  → Do nothing. Page stays normal ✅
+─────────────────────────────────────────────────────
+  User closes tab
+        |
+        v
+  chrome.tabs.onRemoved fires
+        |
+        v
+  chrome.storage.session.remove(tab_{tabId}) — cleanup
 ```
 
 ## Key Design Decisions
 
 1. **Manifest V3** - Required for Chrome 145+, uses service workers instead of background pages.
-2. **Universal `*` selector** - More aggressive than targeting specific elements, but necessary because sites like BLB use deeply nested custom elements with inline styles.
-3. **JS + CSS dual approach** - CSS `!important` handles stylesheet-defined styles, while JS handles inline styles that CSS can't always override.
-4. **MutationObserver** - Essential for single-page apps and sites that load content dynamically (AJAX, lazy loading).
-5. **`requestAnimationFrame` batching** - Prevents excessive DOM walks when many mutations fire at once.
-6. **Class-based scoping (`html.night-reader-active`)** - Clean enable/disable without having to rebuild or compare CSS state.
+2. **Per-tab session storage** - `chrome.storage.session` keyed by `tab_{tabId}` tracks which tabs have dark mode on independently. Clears automatically when browser closes.
+3. **Universal `*` selector** - More aggressive than targeting specific elements, necessary because sites like BLB use deeply nested custom elements with inline styles.
+4. **JS + CSS dual approach** - CSS `!important` handles stylesheet-defined styles, while JS `stripInlineBackgrounds()` handles inline styles that CSS can't override.
+5. **MutationObserver** - Watches for dynamically loaded content and applies dark mode to new elements automatically.
+6. **`requestAnimationFrame` batching** - Prevents excessive DOM walks when many mutations fire at once.
+7. **Class-based scoping (`html.night-reader-active`)** - Clean enable/disable without rebuilding CSS state.
+8. **Tab follows you, not the other way around** - Dark mode is scoped to the tab, not the URL or domain. Every site you visit in a dark-mode tab is dark.
 
 ## Themes Reference
 
