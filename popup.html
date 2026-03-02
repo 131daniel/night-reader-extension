@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Night Reader</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Night Reader</h1>
+      <p class="subtitle">Dark Mode for Comfortable Reading</p>
+    </header>
+
+    <div class="toggle-section">
+      <label class="toggle-label">
+        <span>Dark Mode</span>
+        <div class="toggle-switch">
+          <input type="checkbox" id="darkModeToggle">
+          <span class="slider"></span>
+        </div>
+      </label>
+    </div>
+
+    <div class="themes-section">
+      <h2>Choose Theme</h2>
+      <div class="theme-grid" id="themeGrid">
+        <!-- Themes injected by JS -->
+      </div>
+    </div>
+
+    <div class="brightness-section">
+      <h2>Brightness</h2>
+      <input type="range" id="brightnessSlider" min="50" max="100" value="100">
+      <span id="brightnessValue">100%</span>
+    </div>
+
+    <div class="contrast-section">
+      <h2>Contrast</h2>
+      <input type="range" id="contrastSlider" min="80" max="120" value="100">
+      <span id="contrastValue">100%</span>
+    </div>
+
+    <footer>
+      <p class="site-info" id="siteInfo">—</p>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
