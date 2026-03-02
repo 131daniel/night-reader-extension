@@ -189,6 +189,37 @@ After submission, user realised the `activeTab`-only approach required clicking 
 
 ---
 
+#### v1.0.3 — White Flash Fix on Page Navigation
+
+**User reported:**
+> "When I change a chapter, for the first half second the background is light. How do I make it so the background is never white?"
+
+**Root cause:** A brief gap existed between the browser starting to load the new page and `content.js` being injected (which only happened on `status === 'complete'`). During that gap the page rendered its default white background.
+
+**Fix — Two-stage injection in `background.js`:**
+
+The `tabs.onUpdated` listener now fires on **two** events per navigation instead of one:
+
+1. **`status === 'loading'`** (fires the instant navigation begins):
+   - Reads the user's chosen theme from `chrome.storage.local`
+   - Immediately injects a single CSS rule via `chrome.scripting.insertCSS`:
+     ```css
+     html, body { background: #0d1117 !important; background-image: none !important; }
+     ```
+   - This fires before ANY page content renders — background is dark from frame zero
+
+2. **`status === 'complete'`** (fires when page is fully loaded):
+   - Injects full `content.js` with all 12 theme styles, inline stripping, MutationObserver
+   - Sends `applySettings` message as before
+
+Added `THEME_BG` lookup object to `background.js` so the early flash-prevention CSS uses the exact colour of the user's chosen theme (not just a generic black).
+
+**Result:** Zero white flash — the page background matches the dark theme from the very first frame of every navigation.
+
+**Files changed in v1.0.3:** `manifest.json` (version bump), `background.js`
+
+---
+
 ## Technical Architecture (v1.0.2 — Current)
 
 ```
