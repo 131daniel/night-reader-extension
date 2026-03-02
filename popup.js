@@ -36,7 +36,7 @@ THEMES.forEach(theme => {
   themeGrid.appendChild(swatch);
 });
 
-// Show current site
+// Show current site hostname
 chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   if (tabs[0]?.url) {
     try {
@@ -48,16 +48,14 @@ chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
   }
 });
 
-// Load saved settings
+// Load saved settings and render UI
 chrome.storage.local.get(['enabled', 'themeId', 'brightness', 'contrast'], (data) => {
   darkModeToggle.checked = data.enabled ?? false;
   brightnessSlider.value = data.brightness ?? 100;
   brightnessValue.textContent = (data.brightness ?? 100) + '%';
   contrastSlider.value = data.contrast ?? 100;
   contrastValue.textContent = (data.contrast ?? 100) + '%';
-
-  const activeId = data.themeId || 'midnight';
-  highlightSwatch(activeId);
+  highlightSwatch(data.themeId || 'midnight');
 });
 
 function highlightSwatch(themeId) {
@@ -89,10 +87,26 @@ contrastSlider.addEventListener('input', () => {
   applyToActiveTab();
 });
 
+// Inject content.js into the active tab on demand, then send the apply message
 function applyToActiveTab() {
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (tabs[0]?.id) {
-      chrome.tabs.sendMessage(tabs[0].id, { action: 'applySettings' });
+  chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+    const tab = tabs[0];
+    if (!tab?.id) return;
+
+    // Skip chrome:// and other restricted pages
+    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
+
+    try {
+      // Inject content script if not already present
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content.js']
+      });
+    } catch {
+      // Already injected or page doesn't allow injection — that's fine
     }
+
+    // Now tell the content script to apply the latest settings
+    chrome.tabs.sendMessage(tab.id, { action: 'applySettings' });
   });
 }
