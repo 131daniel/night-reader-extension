@@ -13,13 +13,15 @@ const THEMES = [
   { id: 'sepia',      name: 'Sepia Night', bg: '#1c1810', text: '#c8b89a' },
 ];
 
-const themeGrid = document.getElementById('themeGrid');
-const darkModeToggle = document.getElementById('darkModeToggle');
+const themeGrid       = document.getElementById('themeGrid');
+const darkModeToggle  = document.getElementById('darkModeToggle');
 const brightnessSlider = document.getElementById('brightnessSlider');
 const brightnessValue = document.getElementById('brightnessValue');
-const contrastSlider = document.getElementById('contrastSlider');
-const contrastValue = document.getElementById('contrastValue');
-const siteInfo = document.getElementById('siteInfo');
+const contrastSlider  = document.getElementById('contrastSlider');
+const contrastValue   = document.getElementById('contrastValue');
+const siteInfo        = document.getElementById('siteInfo');
+
+let currentTabId = null;
 
 // Build theme swatches
 THEMES.forEach(theme => {
@@ -36,26 +38,34 @@ THEMES.forEach(theme => {
   themeGrid.appendChild(swatch);
 });
 
-// Show current site hostname
-chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-  if (tabs[0]?.url) {
-    try {
-      const hostname = new URL(tabs[0].url).hostname;
-      siteInfo.textContent = hostname;
-    } catch {
-      siteInfo.textContent = '—';
-    }
-  }
-});
+// Initialise popup — load current tab's state
+chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+  const tab = tabs[0];
+  if (!tab) return;
 
-// Load saved settings and render UI
-chrome.storage.local.get(['enabled', 'themeId', 'brightness', 'contrast'], (data) => {
-  darkModeToggle.checked = data.enabled ?? false;
-  brightnessSlider.value = data.brightness ?? 100;
-  brightnessValue.textContent = (data.brightness ?? 100) + '%';
-  contrastSlider.value = data.contrast ?? 100;
-  contrastValue.textContent = (data.contrast ?? 100) + '%';
-  highlightSwatch(data.themeId || 'midnight');
+  currentTabId = tab.id;
+
+  // Show site hostname
+  try {
+    siteInfo.textContent = new URL(tab.url).hostname;
+  } catch {
+    siteInfo.textContent = '—';
+  }
+
+  // Load per-tab dark mode state from session storage
+  const sessionKey = `tab_${currentTabId}`;
+  const sessionData = await chrome.storage.session.get(sessionKey);
+  const tabEnabled = sessionData[sessionKey] ?? false;
+
+  // Load global theme/brightness/contrast settings
+  chrome.storage.local.get(['themeId', 'brightness', 'contrast'], (data) => {
+    darkModeToggle.checked    = tabEnabled;
+    brightnessSlider.value    = data.brightness ?? 100;
+    brightnessValue.textContent = (data.brightness ?? 100) + '%';
+    contrastSlider.value      = data.contrast ?? 100;
+    contrastValue.textContent = (data.contrast ?? 100) + '%';
+    highlightSwatch(data.themeId || 'midnight');
+  });
 });
 
 function highlightSwatch(themeId) {
@@ -67,46 +77,53 @@ function highlightSwatch(themeId) {
 function selectTheme(themeId) {
   highlightSwatch(themeId);
   chrome.storage.local.set({ themeId });
-  applyToActiveTab();
+  applyToCurrentTab();
 }
 
 darkModeToggle.addEventListener('change', () => {
-  chrome.storage.local.set({ enabled: darkModeToggle.checked });
-  applyToActiveTab();
+  applyToCurrentTab();
 });
 
 brightnessSlider.addEventListener('input', () => {
   brightnessValue.textContent = brightnessSlider.value + '%';
   chrome.storage.local.set({ brightness: parseInt(brightnessSlider.value) });
-  applyToActiveTab();
+  applyToCurrentTab();
 });
 
 contrastSlider.addEventListener('input', () => {
   contrastValue.textContent = contrastSlider.value + '%';
   chrome.storage.local.set({ contrast: parseInt(contrastSlider.value) });
-  applyToActiveTab();
+  applyToCurrentTab();
 });
 
-// Inject content.js into the active tab on demand, then send the apply message
-function applyToActiveTab() {
-  chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
-    const tab = tabs[0];
-    if (!tab?.id) return;
+async function applyToCurrentTab() {
+  if (!currentTabId) return;
 
-    // Skip chrome:// and other restricted pages
-    if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
+  const enabled = darkModeToggle.checked;
 
-    try {
-      // Inject content script if not already present
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        files: ['content.js']
-      });
-    } catch {
-      // Already injected or page doesn't allow injection — that's fine
-    }
+  // Save this tab's dark mode state to session storage
+  // Background service worker watches this to re-inject on navigation
+  const sessionKey = `tab_${currentTabId}`;
+  await chrome.storage.session.set({ [sessionKey]: enabled });
 
-    // Now tell the content script to apply the latest settings
-    chrome.tabs.sendMessage(tab.id, { action: 'applySettings' });
-  });
+  // Also save the enabled state so content.js can read it
+  chrome.storage.local.set({ enabled });
+
+  // Skip restricted pages
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab?.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
+
+  try {
+    // Inject content script into the current tab
+    await chrome.scripting.executeScript({
+      target: { tabId: currentTabId },
+      files: ['content.js'],
+    });
+  } catch {
+    // Already injected — that's fine
+  }
+
+  // Tell content script to apply latest settings
+  chrome.tabs.sendMessage(currentTabId, { action: 'applySettings' }).catch(() => {});
 }
