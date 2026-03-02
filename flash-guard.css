@@ -1,8 +1,9 @@
 /* Injected by Chrome at document_start — before ANY JS or page content.
    This is the fastest possible injection: pure CSS, no script execution needed.
-   Covers html, body, and common full-page wrappers to prevent white flash.
-   flash-guard.js will remove this for tabs without dark mode. */
-html, body {
+   Uses * to cover ALL elements (not just html/body) because sites like BLB
+   have inner divs with white backgrounds that render on top.
+   flash-guard.js removes this stylesheet within ~5ms for non-dark tabs. */
+html, body, * {
   background-color: #111 !important;
   background-image: none !important;
 }
