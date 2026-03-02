@@ -26,44 +26,53 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 
 // ─── Handle tab navigation ────────────────────────────────────────────────────
-// Fires twice per navigation: once on 'loading', once on 'complete'.
-// On 'loading'  → instantly inject a 1-line dark background CSS so the
-//                 page never flashes white, not even for a frame.
-// On 'complete' → inject the full content.js for the complete dark theme.
+// When a dark-mode tab finishes loading, inject the full content.js theme.
+// (The instant dark background is handled by flash-guard.js at document_start.)
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo) => {
+  if (changeInfo.status !== 'complete') return;
+
   const key = `tab_${tabId}`;
   const result = await chrome.storage.session.get(key);
   if (!result[key]) return; // Dark mode not active on this tab — do nothing
 
-  // ── Step 1: Instant background on navigation start ──────────────────────
-  if (changeInfo.status === 'loading') {
-    try {
-      const settings = await chrome.storage.local.get(['themeId']);
-      const bg = THEME_BG[settings.themeId] || '#0d1117';
-      await chrome.scripting.insertCSS({
-        target: { tabId },
-        css: `html,body{background:${bg}!important;background-image:none!important;}`,
-      });
-    } catch {
-      // Restricted page — skip silently
-    }
-    return;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content.js'],
+    });
+    setTimeout(() => {
+      chrome.tabs.sendMessage(tabId, { action: 'applySettings' }).catch(() => {});
+    }, 100);
+  } catch {
+    // Restricted page — skip silently
+  }
+});
+
+// ─── Handle getTabState from flash-guard.js ─────────────────────────────────
+// flash-guard.js runs at document_start (before any paint) and asks us whether
+// dark mode is active for the tab it's running in. We reply with { enabled, bg }
+// so it can either keep the dark background or remove it instantly.
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action !== 'getTabState') return false;
+
+  const tabId = sender.tab?.id;
+  if (!tabId) {
+    sendResponse({ enabled: false });
+    return false;
   }
 
-  // ── Step 2: Full dark theme once page is completely loaded ───────────────
-  if (changeInfo.status === 'complete') {
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        files: ['content.js'],
-      });
-      setTimeout(() => {
-        chrome.tabs.sendMessage(tabId, { action: 'applySettings' }).catch(() => {});
-      }, 100);
-    } catch {
-      // Restricted page — skip silently
-    }
-  }
+  const key = `tab_${tabId}`;
+  // Must return true to use sendResponse asynchronously
+  Promise.all([
+    chrome.storage.session.get(key),
+    chrome.storage.local.get(['themeId']),
+  ]).then(([sessionData, localData]) => {
+    const enabled = sessionData[key] ?? false;
+    const themeId = localData.themeId || 'midnight';
+    const bg = THEME_BG[themeId] || '#0d1117';
+    sendResponse({ enabled, bg });
+  });
+  return true; // keep message channel open for async response
 });
 
 // ─── Clean up session state when a tab is closed ─────────────────────────────
